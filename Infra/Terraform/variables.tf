@@ -14,10 +14,6 @@ description = "Existing EC2 keypair"
 type = string
 }
 
-variable "bucket" {
-  type = string
-  
-}
 
 variable "instance_type" {
 description = "EC2 instance type"

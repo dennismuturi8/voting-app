@@ -4,7 +4,12 @@ data "aws_ami" "this" {
 
   filter {
     name   = "name"
-    values = ["amzn2-ami-hvm-*"]
+    values = ["amzn2-ami-hvm-*-x86_64-gp2"] # Specified architecture in the name
+  }
+
+  filter {
+    name   = "architecture"
+    values = ["x86_64"] # Double-down with a dedicated filter
   }
 }
 resource "aws_instance" "nat" {

@@ -5,15 +5,18 @@ obj/
 .vs/
 node_modules/
 
-# Local .terraform folder
+# Local terraform directory
 **/.terraform/*
 
 # .tfstate files
-*.tfstate
-*.tfstate.*
+terraform.tfstate
+terraform.tfstate.backup
 
 # Crash log files
 crash.log
 
-# Sensitive variables
-*.tfvars
+# Variables files
+terraform.tfvars
+terraform.tfvars.json
+
+.terraform.lock.hcl
