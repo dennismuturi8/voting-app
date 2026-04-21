@@ -13,11 +13,11 @@ on:
 
 env:
   APP_NAME: voting-app-result
-  DOCKER_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-  DOCKER_PASSWORD: ${{ secrets.DOCKERHUB_TOKEN }}
-  GIT_USERNAME: ${{ secrets.GIT_USERNAME }}
-  GIT_EMAIL: ${{ secrets.GIT_EMAIL }}
-  GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
+  #DOCKER_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+  #DOCKER_PASSWORD: ${{ secrets.DOCKERHUB_TOKEN }}
+  #GIT_USERNAME: ${{ secrets.GIT_USERNAME }}
+  #GIT_EMAIL: ${{ secrets.GIT_EMAIL }}
+  #GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
 
 jobs:
   call-docker-build:
@@ -36,7 +36,7 @@ jobs:
       ghcr-enable: true
       image-names: |
         ghcr.io/${{ github.repository_owner }}/voting-app-result
-        $DOCKERHUB_USERNAME/voting-app-result
+        ${{ secrets.DOCKERHUB_USERNAME }}/voting-app-result
       tag-rules: |
         type=sha,format=long,prefix=sha-
         type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
