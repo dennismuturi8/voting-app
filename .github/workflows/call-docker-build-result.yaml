@@ -20,14 +20,14 @@ env:
   GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
 
 jobs:
-  call-docker-build:
+ call-docker-build:
     name: Result Call Docker Build
     uses: dockersamples/.github/.github/workflows/reusable-docker-build.yaml@main
     permissions:
       contents: read
       packages: write
       pull-requests: write
-      security-events: write # Required for Trivy report uploading
+      security-events: write 
     secrets:
       dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
       dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -36,7 +36,8 @@ jobs:
       ghcr-enable: true
       image-names: |
         ghcr.io/${{ github.repository_owner }}/voting-app-result
-        ${{ vars.DOCKERHUB_USERNAME }}/voting-app-result
+        # Reference a variable here, NOT a secret
+        ${{ vars.DOCKERHUB_USERNAME }}/voting-app-result 
       tag-rules: |
         type=sha,format=long,prefix=sha-
         type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
@@ -47,7 +48,7 @@ jobs:
       # scan-severity: 'CRITICAL,HIGH'
 
   # We add a dedicated scan job if the reusable workflow doesn't block the push
-  trivy-scan:
+ trivy-scan:
     needs: call-docker-build
     runs-on: ubuntu-latest
     steps:
@@ -58,7 +59,7 @@ jobs:
           format: 'table'
           severity: 'CRITICAL,HIGH'
 
-  update-gitops:
+ update-gitops:
     needs: [call-docker-build, trivy-scan]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -70,7 +71,7 @@ jobs:
 
       - name: Update Image Tag
         run: |
-           sed -i "s|image: ${{ secrets.DOCKERHUB_USERNAME }}/${{ secrets.APP_NAME }}:.*|image: ${{ secrets.DOCKERHUB_USERNAME }}/${{ secrets.APP_NAME }}:${{ github.sha }}|g" k8s/result-deployment.yaml
+           sed -i "s|image: ${{ env.DOCKERHUB_USERNAME }}/${{ env.APP_NAME }}:.*|image: ${{ env.DOCKERHUB_USERNAME }}/${{ env.APP_NAME }}:${{ github.sha }}|g" k8s/result-deployment.yaml
 
       - name: Commit and Push
         run: |
