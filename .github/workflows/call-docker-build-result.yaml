@@ -37,7 +37,7 @@ jobs:
       image-names: |
         ghcr.io/${{ github.repository_owner }}/voting-app-result
         # Reference a variable here, NOT a secret
-        ${{ secrets.DOCKERHUB_USERNAME }}/voting-app-result 
+        ${{ vars.DOCKERHUB_USERNAME }}/voting-app-result 
       tag-rules: |
         type=sha,format=long,prefix=sha-
         type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
