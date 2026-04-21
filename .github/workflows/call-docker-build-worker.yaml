@@ -1,82 +1,89 @@
-name: Build Worker
-# template source: https://github.com/dockersamples/.github/blob/main/templates/call-docker-build.yaml
+
+name: Build and Scan Worker Service
 
 on:
-  # we want pull requests so we can build(test) but not push to image registry
   push:
-    branches:
-      - 'main'
-    # only build when important files change
+    branches: [ 'main' ]
     paths:
-      - 'worker/**'
+      - 'result/**'
       - '.github/workflows/call-docker-build-worker.yaml'
   pull_request:
-    branches:
-      - 'main'
-    # only build when important files change
+    branches: [ 'main' ]
     paths:
-      - 'worker/**'
-      - '.github/workflows/call-docker-build-worker.yaml'
+      - 'result/**'
+
+env:
+  APP_NAME: voting-app-worker
+  DOCKER_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+  DOCKER_PASSWORD: ${{ secrets.DOCKERHUB_TOKEN }}
+  GIT_USERNAME: ${{ secrets.GIT_USERNAME }}
+  GIT_EMAIL: ${{ secrets.GIT_EMAIL }}
+  GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
 
 jobs:
-  call-docker-build:
-
-    name: Worker Call Docker Build
-
+ call-docker-build:
+    name: Result Call Docker Build
     uses: dockersamples/.github/.github/workflows/reusable-docker-build.yaml@main
-
     permissions:
       contents: read
-      packages: write # needed to push docker image to ghcr.io
-      pull-requests: write # needed to create and update comments in PRs
-    
+      packages: write
+      pull-requests: write
+      security-events: write 
     secrets:
-
-      # Only needed if with:dockerhub-enable is true below
       dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-
-      # Only needed if with:dockerhub-enable is true below
       dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-
     with:
-      
-      ### REQUIRED
-      ### ENABLE ONE OR BOTH REGISTRIES
-      ### tell docker where to push.
-      ### NOTE if Docker Hub is set to true, you must set secrets above and also add account/repo/tags below
       dockerhub-enable: true
       ghcr-enable: true
-
-      ### REQUIRED 
-      ### A list of the account/repo names for docker build. List should match what's enabled above
-      ### defaults to:
       image-names: |
-        ghcr.io/dockersamples/example-voting-app-worker
-        dockersamples/examplevotingapp_worker
-      
-      ### REQUIRED set rules for tagging images, based on special action syntax:
-      ### https://github.com/docker/metadata-action#tags-input
-      ### defaults to:
+        ghcr.io/${{ github.repository_owner }}/worker-app-vote
+        # Reference a variable here, NOT a secret
+        ${{ vars.DOCKERHUB_USERNAME }}/worker-app-vote 
       tag-rules: |
-        type=raw,value=latest,enable=${{ endsWith(github.ref, github.event.repository.default_branch) }}
-        type=ref,event=pr
-      
-      ### path to where docker should copy files into image
-      ### defaults to root of repository (.)
+        type=sha,format=long,prefix=sha-
+        type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
       context: worker
-      
-      ### Dockerfile alternate name. Default is Dockerfile (relative to context path)
-      # file: Containerfile
+      ### ADDING SCANNING PARAMETERS
+      # Note: If the reusable template supports it, we enable it here:
+      #scan-enable: true 
+      #scan-severity: 'CRITICAL,HIGH'
 
-      ### build stage to target, defaults to empty, which builds to last stage in Dockerfile
-      # target:
-      
-      ### platforms to build for, defaults to linux/amd64
-      ### other options: linux/amd64,linux/arm64,linux/arm/v7
-      # FIXME worker arm/v7 support doesn't build in .net core 3.1 with QEMU
-      # a fix would likely run the .net build on amd64 but with a target of arm/v7
-      platforms: linux/amd64,linux/arm64,linux/arm/v7
-      
-      ### Create a PR comment with image tags and labels
-      ### defaults to false
-      # comment-enable: false
+  # We add a dedicated scan job if the reusable workflow doesn't block the push
+ trivy-scan:
+    needs: call-docker-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'ghcr.io/${{ github.repository_owner }}/voting-app-worker:sha-${{ github.sha }}'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+
+ update-gitops:
+    needs: [call-docker-build, trivy-scan]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GIT_TOKEN }}
+
+      - name: Update Image Tag
+        run: |
+           sed -i "s|image: ${{ env.DOCKERHUB_USERNAME }}/${{ env.APP_NAME }}:.*|image: ${{ env.DOCKERHUB_USERNAME }}/${{ env.APP_NAME }}:${{ github.sha }}|g" k8s/worker-deployment.yaml
+
+      - name: Commit and Push
+        run: |
+          git config --global user.name "GitOps Bot"
+          git config --global user.email "actions@github.com"
+          git add k8s/result-deployment.yaml
+          
+          # Check if there are staged changes
+          if git diff --cached --quiet; then
+            echo "No changes to commit. Skipping..."
+          else
+            git commit -m "chore(gitops): update result service to sha-${{ github.sha }} [skip ci]"
+            git push
+          fi
