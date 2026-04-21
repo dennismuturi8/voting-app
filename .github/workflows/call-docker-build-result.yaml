@@ -36,7 +36,7 @@ jobs:
       ghcr-enable: true
       image-names: |
         ghcr.io/${{ github.repository_owner }}/voting-app-result
-        ${{ secrets.DOCKERHUB_USERNAME }}/voting-app-result
+        ${{ env.DOCKERHUB_USERNAME }}/voting-app-result
       tag-rules: |
         type=sha,format=long,prefix=sha-
         type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
@@ -66,7 +66,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GIT_TOKEN }}
+          token: ${{ env.GIT_TOKEN }}
 
       - name: Update Image Tag
         run: |
