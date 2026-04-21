@@ -80,3 +80,12 @@ jobs:
           git add k8s/result-deployment.yaml
           git commit -m "chore(gitops): update result service to sha-${{ github.sha }} [skip ci]"
           git push
+
+          #Check if there are staged changes
+          if git diff --cached --quiet; then
+            echo "No changes to commit. Skipping..."
+          else
+            git commit -m "chore(gitops): update result service to sha-${{ github.sha }} [skip ci]"
+            git push
+          fi
+
