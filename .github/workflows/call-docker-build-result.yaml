@@ -5,7 +5,7 @@ on:
     branches: [ 'main' ]
     paths:
       - 'result/**'
-      - '.github/workflows/build-result.yml'
+      - '.github/workflows/call-docker-build-result.yaml'
   pull_request:
     branches: [ 'main' ]
     paths:
