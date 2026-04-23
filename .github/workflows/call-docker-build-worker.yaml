@@ -5,12 +5,12 @@ on:
   push:
     branches: [ 'main' ]
     paths:
-      - 'result/**'
+      - 'worker/**'
       - '.github/workflows/call-docker-build-worker.yaml'
   pull_request:
     branches: [ 'main' ]
     paths:
-      - 'result/**'
+      - 'worker/**'
 
 env:
   APP_NAME: voting-app-worker
@@ -43,12 +43,7 @@ jobs:
         type=sha,format=long,prefix=sha-
         type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
       context: worker
-      ### ADDING SCANNING PARAMETERS
-      # Note: If the reusable template supports it, we enable it here:
-      #scan-enable: true 
-      #scan-severity: 'CRITICAL,HIGH'
-
-  # We add a dedicated scan job if the reusable workflow doesn't block the push
+     
  trivy-scan:
     needs: call-docker-build
     runs-on: ubuntu-latest
@@ -78,12 +73,12 @@ jobs:
         run: |
           git config --global user.name "GitOps Bot"
           git config --global user.email "actions@github.com"
-          git add k8s/result-deployment.yaml
+          git add k8s/worker-deployment.yaml
           
           # Check if there are staged changes
           if git diff --cached --quiet; then
             echo "No changes to commit. Skipping..."
           else
-            git commit -m "chore(gitops): update result service to sha-${{ github.sha }} [skip ci]"
+            git commit -m "chore(gitops): update worker service to sha-${{ github.sha }} [skip ci]"
             git push
           fi
