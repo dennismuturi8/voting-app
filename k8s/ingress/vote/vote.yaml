@@ -3,6 +3,8 @@ kind: Ingress
 metadata:
   name: vote
   namespace: voting
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
 spec:
   ingressClassName: nginx
   rules:
