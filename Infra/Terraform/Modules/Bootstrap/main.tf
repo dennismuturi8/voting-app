@@ -13,7 +13,7 @@ resource "null_resource" "cluster_bootstrap" {
     agent               = false
   }
 
-provisioner "remote-exec" {
+ provisioner "remote-exec" {
   inline = [
     # 1. Wait for System/Apt locks to clear
     "echo 'Waiting for cloud-init/apt locks...'",
@@ -48,10 +48,12 @@ provisioner "remote-exec" {
 
     # 9. Patch NodePorts (for ALB compatibility)
     "echo 'Patching NodePorts for ALB...'",
-    "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf patch svc ingress-nginx-controller -n ingress-nginx --type='json' -p='[{\"op\": \"replace\", \"path\": \"/spec/ports/0/nodePort\", \"value\": 32080}, {\"op\": \"replace\", \"path\": \"/spec/ports/1/nodePort\", \"value\": 32443}]'"
+    "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf patch svc ingress-nginx-controller -n ingress-nginx --type='json' -p='[{\"op\": \"replace\", \"path\": \"/spec/ports/0/nodePort\", \"value\": 31000}, {\"op\": \"replace\", \"path\": \"/spec/ports/1/nodePort\", \"value\": 31001}]'"
   ]
-}
-}
+  
+ }
+  }
+
 
 variable "bastion_ip" {
   type = string
