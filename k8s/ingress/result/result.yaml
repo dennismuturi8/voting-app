@@ -4,6 +4,7 @@ metadata:
   name: result
   namespace: voting
 spec:
+  ingressClassName: nginx
   rules:
   - http:
       paths:
