@@ -7,6 +7,8 @@ resource "aws_lb" "alb" {
 }
 
 resource "aws_lb_target_group" "tg" {
+  #target_type = "instance"
+  #name        = "k8s-tg"
   port     = 31000
   protocol = "HTTP"
   vpc_id   = var.vpc_id

@@ -110,8 +110,8 @@ resource "aws_security_group" "alb_sg" {
 # 1. Allow ALB to reach the Private Nodes 
 resource "aws_security_group_rule" "alb_to_nodes" {
   type                     = "ingress"
-  from_port                = 30000
-  to_port                  = 32767
+  from_port                = 31000
+  to_port                  = 31000
   protocol                 = "tcp"
   security_group_id        = aws_security_group.alb_sg.id
   source_security_group_id = aws_security_group.private_sg.id
@@ -120,8 +120,8 @@ resource "aws_security_group_rule" "alb_to_nodes" {
 # 2. Allow Private Nodes to receive from ALB 
 resource "aws_security_group_rule" "nodes_from_alb" {
   type                     = "ingress"
-  from_port                = 32080
-  to_port                  = 32080
+  from_port                = 31000
+  to_port                  = 31000
   protocol                 = "tcp"
   security_group_id        = aws_security_group.private_sg.id
   source_security_group_id = aws_security_group.alb_sg.id
