@@ -13,37 +13,44 @@ resource "null_resource" "cluster_bootstrap" {
     agent               = false
   }
 
-  provisioner "remote-exec" {
-    inline = [
-      # 1. Wait for System/Apt locks to clear (Common on fresh VMs)
-      "echo 'Waiting for cloud-init/apt locks...'",
-      "while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 5; done",
-      
-      # 2. Update Apt (Standard procedure)
-      "sudo apt-get update -y",
+provisioner "remote-exec" {
+  inline = [
+    # 1. Wait for System/Apt locks to clear
+    "echo 'Waiting for cloud-init/apt locks...'",
+    "while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 5; done",
+    
+    # 2. Update Apt
+    "sudo apt-get update -y",
 
-      # 3. The "Wait for K8s" Loop (Crucial)
-      # Terraform connects the moment SSH is up, but the API server takes longer to start.
-      "echo 'Waiting for Kubernetes API to respond...'",
-      "timeout 300 bash -c 'until sudo kubectl --kubeconfig /etc/kubernetes/admin.conf cluster-info; do sleep 10; done'",
+    # 3. Wait for Kubernetes API
+    "echo 'Waiting for Kubernetes API to respond...'",
+    "timeout 300 bash -c 'until sudo kubectl --kubeconfig /etc/kubernetes/admin.conf cluster-info; do sleep 10; done'",
 
-      # 4. Create Namespace (Idempotent style)
-      "echo 'Creating ArgoCD Namespace...'",
-      "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf create namespace argocd --dry-run=client -o yaml | sudo kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f -",
+    # 4. Create ArgoCD Namespace
+    "echo 'Creating ArgoCD Namespace...'",
+    "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf create namespace argocd --dry-run=client -o yaml | sudo kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f -",
 
-      # 5. Apply ArgoCD Manifests
-      "echo 'Installing ArgoCD...'",
-      "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf apply --server-side --force-conflicts -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml",
-      
-      # 6. Create NGINX Ingress Namespace 
-      "echo 'Creating NGINX Ingress Namespace...'",
-      "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf create namespace ingress-nginx --dry-run=client -o yaml | sudo kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f -",
+    # 5. Install ArgoCD
+    "echo 'Installing ArgoCD...'",
+    "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf apply --server-side --force-conflicts -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml",
 
-      # 7. Install NGINX Ingress Controller
-      "echo 'Installing NGINX Ingress Controller...'",
-      "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml"
-    ]
-  }
+    # 6. Create NGINX Ingress Namespace
+    "echo 'Creating NGINX Ingress Namespace...'",
+    "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf create namespace ingress-nginx --dry-run=client -o yaml | sudo kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f -",
+
+    # 7. Install NGINX Ingress Controller
+    "echo 'Installing NGINX Ingress Controller...'",
+    "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/baremetal/deploy.yaml",
+
+    # 8. Wait for Ingress Controller to be ready
+    "echo 'Waiting for NGINX Ingress Controller...'",
+    "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf wait --namespace ingress-nginx --for=condition=available deployment/ingress-nginx-controller --timeout=300s",
+
+    # 9. Patch NodePorts (for ALB compatibility)
+    "echo 'Patching NodePorts for ALB...'",
+    "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf patch svc ingress-nginx-controller -n ingress-nginx --type='json' -p='[{\"op\": \"replace\", \"path\": \"/spec/ports/0/nodePort\", \"value\": 32080}, {\"op\": \"replace\", \"path\": \"/spec/ports/1/nodePort\", \"value\": 32443}]'"
+  ]
+}
 }
 
 variable "bastion_ip" {

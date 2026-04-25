@@ -35,6 +35,7 @@ module "security" {
   vpc_id = module.network.vpc_id
   bastion_ip = module.bastion.bastion_ip
   nat_instance_public_ip = module.nat_instance.nat_instance_public_ip
+  alb_sg_id = module.security.alb_sg
 }
 
 module "bastion" {
@@ -51,7 +52,6 @@ module "compute" {
   sg_id     = module.security.private_sg
   key_name  = var.key_name
   instance_type = var.instance_type
-
   depends_on = [ module.nat_instance]
 }
 

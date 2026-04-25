@@ -48,6 +48,13 @@ resource "aws_security_group" "private_sg" {
     security_groups = [aws_security_group.bastion_sg.id]
   }
 
+ /*ingress {
+  from_port       = 32080
+  to_port         = 32080
+  protocol        = "tcp"
+  security_groups = [var.alb_sg_id]
+}*/
+
   # Node communication (for kubelet, pod network, etc.)
   ingress {
     from_port       = 0
@@ -63,9 +70,6 @@ resource "aws_security_group" "private_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
-
-
-
 
 # ALB SG
 resource "aws_security_group" "alb_sg" {
@@ -88,12 +92,12 @@ resource "aws_security_group" "alb_sg" {
   }
 
   # Allow ALB to reach the nodes (assume node SG)
-  ingress {
+  /*ingress {
     from_port       = 30000
     to_port         = 32767
     protocol        = "tcp"
     security_groups = [aws_security_group.private_sg.id]  # NodePort range
-  }
+  }*/
 
   egress {
     from_port   = 0
@@ -101,6 +105,26 @@ resource "aws_security_group" "alb_sg" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
+}
+
+# 1. Allow ALB to reach the Private Nodes 
+resource "aws_security_group_rule" "alb_to_nodes" {
+  type                     = "ingress"
+  from_port                = 30000
+  to_port                  = 32767
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.alb_sg.id
+  source_security_group_id = aws_security_group.private_sg.id
+}
+
+# 2. Allow Private Nodes to receive from ALB 
+resource "aws_security_group_rule" "nodes_from_alb" {
+  type                     = "ingress"
+  from_port                = 32080
+  to_port                  = 32080
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.private_sg.id
+  source_security_group_id = aws_security_group.alb_sg.id
 }
 
 # Variables
@@ -115,10 +139,9 @@ variable "bastion_ip" {
 variable "nat_instance_public_ip" {
   type = string
 }
-
-
-
-/*variable "my_ip_cidr" {
+variable "alb_sg_id" {
   type = string
-  description = "Your laptop public IP in CIDR format, e.g., 1.2.3.4/32"
-}*/
+}
+
+
+

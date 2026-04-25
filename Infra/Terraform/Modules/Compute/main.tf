@@ -109,7 +109,3 @@ variable "private_subnets_id" {}
 variable "sg_id" {}
 variable "key_name" {}
 variable "instance_type" {}
-
-
-
-
