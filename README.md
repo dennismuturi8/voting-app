@@ -78,6 +78,21 @@ kubectl get pods -A
 
 ## 🚀 Deploying with ArgoCD
 
+### Retrieve the ArgoCD Admin Password
+
+```bash
+kubectl get secret argocd-initial-admin-secret \
+  -n argocd \
+  -o jsonpath="{.data.password}" | base64 --decode && echo
+```
+
+Login credentials:
+```
+Username: admin
+Password: <output from command above>
+```
+
+
 ### Access the ArgoCD UI
 
 ArgoCD runs inside the cluster. Access it via port-forward from the master node:
@@ -98,25 +113,12 @@ https://localhost:8080
 > ```
 > Then open `https://localhost:8080` in your local browser.
 
-### Retrieve the ArgoCD Admin Password
-
-```bash
-kubectl get secret argocd-initial-admin-secret \
-  -n argocd \
-  -o jsonpath="{.data.password}" | base64 --decode && echo
-```
-
-Login credentials:
-```
-Username: admin
-Password: <output from command above>
-```
 
 ---
 
 ## 🌐 Accessing the Applications
 
-### Step 1 — Get the ALB IP via nslookup
+### Step 1 — Get the ALB IP via nslookup (Option 1)
 
 ALB DNS names resolve to one or more IPs. Run this to get the IP:
 
@@ -128,6 +130,22 @@ Example output:
 ```
 Name:    k8s-alb-xxxxxxxxx.us-east-1.elb.amazonaws.com
 Address: 54.123.45.67    ← use this IP
+```
+## Option 2 — Cheap Real Domain (~$1–3/year)
+
+If you want a real domain for your portfolio/project:
+
+| Registrar | Cheap TLDs | Price |
+|---|---|---|
+| **Namecheap** | `.xyz`, `.online`, `.site` | ~$1–3/year |
+| **Cloudflare** | `.com` | ~$10/year (at cost) |
+| **AWS Route 53** | `.click`, `.link` | ~$3–5/year |
+
+Then create **CNAME records** in Route 53 or Cloudflare:
+
+```dns
+vote.yourdomain.xyz    CNAME → k8s-alb-xxxx.us-east-1.elb.amazonaws.com
+result.yourdomain.xyz  CNAME → k8s-alb-xxxx.us-east-1.elb.amazonaws.com
 ```
 
 > ⚠️ ALB IPs are **not static** — they can change. For production use a real domain with a CNAME record pointing to the ALB DNS name.
@@ -192,7 +210,7 @@ metadata:
     kubernetes.io/ingress.class: "nginx"
 spec:
   rules:
-  - host: vote.<ALB-IP>.nip.io
+  - host: vote.<ALB-IP>.nip.io / real domain
     http:
       paths:
       - path: /
@@ -202,7 +220,7 @@ spec:
             name: vote
             port:
               number: 80
-  - host: result.<ALB-IP>.nip.io
+  - host: result.<ALB-IP>.nip.io / real domain
     http:
       paths:
       - path: /
