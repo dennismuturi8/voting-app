@@ -1,42 +1,251 @@
-Example Voting App
-A simple distributed application running across multiple Docker containers.
+# 🗳️ Kubernetes Voting App — Docker Cats vs Dogs
 
-Getting started
-Download Docker Desktop for Mac or Windows. Docker Compose will be automatically installed. On Linux, make sure you have the latest version of Compose.
+A cloud-native distributed voting application deployed on a **kubeadm Kubernetes cluster** on AWS, using **ArgoCD** for GitOps, **NGINX Ingress** on a private subnet, and an **AWS ALB** on a public subnet as the entry point.
 
-This solution uses Python, Node.js, .NET, with Redis for messaging and Postgres for storage.
+---
 
-Run in this directory to build and run the app:
+## 📐 Architecture Overview
 
-docker compose up
-The vote app will be running at http://localhost:8080, and the results will be at http://localhost:8081.
+```
+Internet
+    │
+    ▼
+[AWS ALB - Public Subnet]
+    │  forwards to NodePort 31000
+    ▼
+[NGINX Ingress Controller - Private Subnet]
+    │  routes by Host header
+    ├──► vote service (ClusterIP:80)
+    └──► result service (ClusterIP:80)
+         │
+    [Worker → Redis → PostgreSQL]
+```
 
-Alternately, if you want to run it on a Docker Swarm, first make sure you have a swarm. If you don't, run:
+### Components
 
-docker swarm init
-Once you have your swarm, in this directory run:
+| Component | Description |
+|---|---|
+| **ALB** | AWS Application Load Balancer on public subnet — entry point for all traffic |
+| **NGINX Ingress** | In-cluster ingress controller exposed via NodePort on private subnet |
+| **Vote App** | Python Flask frontend — cast your vote |
+| **Result App** | Node.js frontend — view live results |
+| **Worker** | .NET background processor — moves votes from Redis to PostgreSQL |
+| **Redis** | In-memory queue for incoming votes |
+| **PostgreSQL** | Persistent storage for final vote counts |
+| **ArgoCD** | GitOps controller — syncs cluster state from this repository |
 
-docker stack deploy --compose-file docker-stack.yml vote
-Run the app in Kubernetes
-The folder k8s-specifications contains the YAML specifications of the Voting App's services.
+---
 
-Run the following command to create the deployments and services. Note it will create these resources in your current namespace (default if you haven't changed it.)
+## 🔐 Accessing the Cluster
 
-kubectl create -f k8s-specifications/
-The vote web app is then available on port 31000 on each host of the cluster, the result web app is available on port 31001.
+The Kubernetes master node sits on a **private subnet** and is not directly reachable from the internet. Access is via a **bastion/jumphost** on the public subnet.
 
-To remove them, run:
+### Step 1 — Add your SSH key to the agent
 
-kubectl delete -f k8s-specifications/
-Architecture
-Architecture diagram
+```bash
+# Start the SSH agent if not already running
+eval $(ssh-agent -s)
 
-A front-end web app in Python which lets you vote between two options
-A Redis which collects new votes
-A .NET worker which consumes votes and stores them in…
-A Postgres database backed by a Docker volume
-A Node.js web app which shows the results of the voting in real time
-Notes
-The voting application only accepts one vote per client browser. It does not register additional votes if a vote has already been submitted from a client.
+# Add your private key
+ssh-add /path/to/<your-key.pem>
 
-This isn't an example of a properly architected perfectly designed distributed app... it's just a simple example of the various types of pieces and languages you might see (queues, persistent data, etc), and how to deal with them in Docker at a basic level.
+# Verify it was added
+ssh-add -l
+```
+
+### Step 2 — SSH into the Jumphost with Agent Forwarding
+
+```bash
+ssh -A ubuntu@<JUMPHOST-PUBLIC-IP>
+```
+
+> The `-A` flag forwards your SSH agent to the jumphost so you can hop to private instances without copying your key.
+
+### Step 3 — SSH from Jumphost to the K8s Master Node
+
+```bash
+ssh ubuntu@<MASTER-NODE-PRIVATE-IP>
+```
+
+### Step 4 — Verify Cluster is Healthy
+
+```bash
+kubectl get nodes
+kubectl get pods -A
+```
+
+---
+
+## 🚀 Deploying with ArgoCD
+
+### Access the ArgoCD UI
+
+ArgoCD runs inside the cluster. Access it via port-forward from the master node:
+
+```bash
+kubectl port-forward svc/argocd-server -n argocd 8080:443
+```
+
+Then open your browser at:
+```
+https://localhost:8080
+```
+
+> If accessing remotely via SSH tunnel, run this on your **local machine**:
+> ```bash
+> ssh -A -L 8080:localhost:8080 ubuntu@<JUMPHOST-PUBLIC-IP> \
+>     ssh -L 8080:localhost:8080 ubuntu@<MASTER-NODE-PRIVATE-IP>
+> ```
+> Then open `https://localhost:8080` in your local browser.
+
+### Retrieve the ArgoCD Admin Password
+
+```bash
+kubectl get secret argocd-initial-admin-secret \
+  -n argocd \
+  -o jsonpath="{.data.password}" | base64 --decode && echo
+```
+
+Login credentials:
+```
+Username: admin
+Password: <output from command above>
+```
+
+---
+
+## 🌐 Accessing the Applications
+
+### Step 1 — Get the ALB IP via nslookup
+
+ALB DNS names resolve to one or more IPs. Run this to get the IP:
+
+```bash
+nslookup <your-alb-dns>.us-east-1.elb.amazonaws.com
+```
+
+Example output:
+```
+Name:    k8s-alb-xxxxxxxxx.us-east-1.elb.amazonaws.com
+Address: 54.123.45.67    ← use this IP
+```
+
+> ⚠️ ALB IPs are **not static** — they can change. For production use a real domain with a CNAME record pointing to the ALB DNS name.
+
+### Step 2 — Access the Apps via nip.io
+
+Using the IP from the nslookup output, open your browser:
+
+| App | URL |
+|---|---|
+| 🐱🐶 **Vote** | `http://vote.<ALB-IP>.nip.io` |
+| 📊 **Results** | `http://result.<ALB-IP>.nip.io` |
+
+Example (replace with your actual ALB IP):
+```
+http://vote.54.123.45.67.nip.io
+http://result.54.123.45.67.nip.io
+```
+
+> `nip.io` is a free wildcard DNS service that automatically resolves `*.54.123.45.67.nip.io` to `54.123.45.67` — no DNS configuration needed.
+
+---
+
+## 📁 Repository Structure
+
+```
+voting-app/
+├── k8s/
+│   ├── vote/
+│   │   ├── vote-deployment.yaml
+│   │   └── vote-service.yaml        # ClusterIP:80
+│   ├── result/
+│   │   ├── result-deployment.yaml
+│   │   └── result-service.yaml      # ClusterIP:80
+│   ├── worker/
+│   │   └── worker-deployment.yaml
+│   ├── redis/
+│   │   ├── redis-deployment.yaml
+│   │   └── redis-service.yaml
+│   ├── db/
+│   │   ├── db-deployment.yaml
+│   │   └── db-service.yaml
+│   └── ingress/
+│       └── voting-app-ingress.yaml  # Host-based NGINX ingress
+├── main.tf                          # AWS infrastructure (ALB, VPC, subnets)
+└── README.md
+```
+
+---
+
+## ⚙️ Ingress Configuration
+
+Host-based routing is used so each app is served at root `/`, preserving internal asset paths and form submissions:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: voting-app-ingress
+  namespace: voting
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+spec:
+  rules:
+  - host: vote.<ALB-IP>.nip.io
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: vote
+            port:
+              number: 80
+  - host: result.<ALB-IP>.nip.io
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: result
+            port:
+              number: 80
+```
+
+---
+
+## 🛠️ Useful kubectl Commands
+
+```bash
+# Check all resources in voting namespace
+kubectl get all -n voting
+
+# Check ingress routing
+kubectl describe ingress voting-app-ingress -n voting
+
+# Check NGINX ingress controller logs
+kubectl logs -n ingress-nginx \
+  $(kubectl get pods -n ingress-nginx -o jsonpath='{.items[0].metadata.name}') \
+  --tail=50
+
+# Check ArgoCD app sync status
+kubectl get applications -n argocd
+
+# Restart a deployment
+kubectl rollout restart deployment/vote -n voting
+```
+
+---
+
+## 🔗 Key Design Decisions
+
+| Decision | Reason |
+|---|---|
+| ALB on public subnet | Shields private cluster from direct internet exposure |
+| NGINX as NodePort | Simple, no AWS API calls needed — no OIDC/IRSA required |
+| App services as ClusterIP | Only ingress needs to be reachable externally |
+| Host-based routing | Path-based routing breaks the vote app's internal form POST and static asset loading |
+| nip.io for DNS | Zero-config wildcard DNS for testing without a registered domain |
+| ArgoCD for GitOps | Declarative, auditable deployments synced from git |

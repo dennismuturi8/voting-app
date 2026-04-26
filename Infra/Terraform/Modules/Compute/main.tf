@@ -104,7 +104,6 @@ resource "aws_instance" "workers" {
   tags = { Name = "k8s-worker-${count.index}" }
 }
 
-# modules/compute/variables.tf
 variable "private_subnets_id" {}
 variable "sg_id" {}
 variable "key_name" {}

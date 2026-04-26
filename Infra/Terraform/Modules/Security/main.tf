@@ -48,13 +48,6 @@ resource "aws_security_group" "private_sg" {
     security_groups = [aws_security_group.bastion_sg.id]
   }
 
- /*ingress {
-  from_port       = 32080
-  to_port         = 32080
-  protocol        = "tcp"
-  security_groups = [var.alb_sg_id]
-}*/
-
   # Node communication (for kubelet, pod network, etc.)
   ingress {
     from_port       = 0
@@ -90,14 +83,6 @@ resource "aws_security_group" "alb_sg" {
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
-
-  # Allow ALB to reach the nodes (assume node SG)
-  /*ingress {
-    from_port       = 30000
-    to_port         = 32767
-    protocol        = "tcp"
-    security_groups = [aws_security_group.private_sg.id]  # NodePort range
-  }*/
 
   egress {
     from_port   = 0

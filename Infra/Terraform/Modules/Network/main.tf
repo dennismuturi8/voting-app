@@ -10,11 +10,6 @@ type        = list(string)
 default = ["10.0.3.0/24", "10.0.4.0/24"]
 }
 
-/*variable "primary_network_interface_id" {
-  description = "ID of the NAT instance's network interface to route private subnet traffic through"
-  type        = string
-}*/
-
 variable "vpc_cidr" {
   type = string
 }
@@ -32,7 +27,6 @@ resource "aws_vpc" "main" {
     Name = "BPN-VPC"
   }
 }
-
 
 # Public subnet
 resource "aws_subnet" "public_subnets" {
@@ -93,12 +87,6 @@ resource "aws_route_table" "private_rt" {
     Name = "private-rt"
 }
 }
-
-/*resource "aws_route" "private_internet" {
-  route_table_id         = aws_route_table.private_rt.id
-  destination_cidr_block = "0.0.0.0/0"
-  network_interface_id = var.primary_network_interface_id
-}*/
 
 resource "aws_route_table_association" "private_assoc" {
   count          = length(var.private_subnets_cidr)
