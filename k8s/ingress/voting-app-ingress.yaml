@@ -17,6 +17,9 @@ spec:
             name: vote
             port:
               number: 80
+
+  - http:
+      paths:
       - path: /result(/|$)(.*)
         pathType: Prefix
         backend:
