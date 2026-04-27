@@ -66,14 +66,14 @@ ssh -A ubuntu@<BASTION_HOST-PUBLIC-IP>
 ```bash
 ssh ubuntu@<CONTROL_PLANE-PRIVATE-IP>
 ```
-### Step 2.3 - This is a quick way to Control Plane using one command 
+### Step 2.2 - This is a quick way to Control Plane using one command 
 
 ```bash
 ssh -L 8080:localhost:8080 -J ubuntu@<BASTION_HOST-PUBLIC-IP> ubuntu@<CONTROL_PLANE-PRIVATE-IP>
 ```
 > This is fast and I would recommend using this command.
 
-## Step 2.4 - Bonus — SOCKS Proxy for Multiple Services
+## Step 2.3 - Bonus — SOCKS Proxy for Multiple Services
 
 If you want to access multiple services (ArgoCD, Grafana, etc.) without
 starting a dozen port-forwards, use a SOCKS proxy.
