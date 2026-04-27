@@ -53,21 +53,49 @@ ssh-add /path/to/<your-key.pem>
 ssh-add -l
 ```
 
-### Step 2 — SSH into the Jumphost with Agent Forwarding
+### Step 2.0 — SSH into the Jumphost with Agent Forwarding
 
 ```bash
-ssh -A ubuntu@<JUMPHOST-PUBLIC-IP>
+ssh -A ubuntu@<BASTION_HOST-PUBLIC-IP>
 ```
 
 > The `-A` flag forwards your SSH agent to the jumphost so you can hop to private instances without copying your key.
 
-### Step 3 — SSH from Jumphost to the K8s Master Node
+### Step 2.1 — SSH from Jumphost to the K8s Master Node
 
 ```bash
-ssh ubuntu@<MASTER-NODE-PRIVATE-IP>
+ssh ubuntu@<CONTROL_PLANE-PRIVATE-IP>
+```
+### Step 2.3 - This is a quick way to Control Plane using one command 
+
+```bash
+ssh -L 8080:localhost:8080 -J ubuntu@<BASTION_HOST-PUBLIC-IP> ubuntu@<CONTROL_PLANE-PRIVATE-IP>
+```
+> This is fast and I would recommend using this command.
+
+## Step 2.4 - Bonus — SOCKS Proxy for Multiple Services
+
+If you want to access multiple services (ArgoCD, Grafana, etc.) without
+starting a dozen port-forwards, use a SOCKS proxy.
+
+### I. Start a Dynamic Tunnel
+
+```bash
+ssh -D 9090 -J ubuntu@<BASTION_IP> ubuntu@<CONTROL_PLANE_IP>
 ```
 
-### Step 4 — Verify Cluster is Healthy
+### II. Configure your Browser
+
+Use a browser extension like **FoxyProxy** or change your system proxy
+settings to use a **SOCKS5 proxy** at `localhost:9090`.
+
+### III. Access the UI
+
+You can now reach any service directly using its internal **Cluster IP**
+or **NodePort** — no additional port-forwards needed.
+
+
+### Step 3 — Verify Cluster is Healthy
 
 ```bash
 kubectl get nodes
@@ -98,7 +126,7 @@ Password: <output from command above>
 ArgoCD runs inside the cluster. Access it via port-forward from the master node:
 
 ```bash
-kubectl port-forward svc/argocd-server -n argocd 8080:443
+sudo kubectl --kubeconfig /etc/kubernetes/admin.conf port-forward svc/argocd-server -n argocd 8080:443
 ```
 
 Then open your browser at:
