@@ -7,7 +7,7 @@ metadata:
     kubernetes.io/ingress.class: "nginx"
 spec:
   rules:
-  - host: vote.107.20.228.88.nip.io # Replace with your actual domain or get the ip address by running nslookup+alb_dns then pick the ip address and replace it in the host field.
+  - host: vote.52.201.208.153.nip.io # Replace with your actual domain or get the ip address by running nslookup+alb_dns then pick the ip address and replace it in the host field.
     http:
       paths:
       - path: /
@@ -18,7 +18,7 @@ spec:
             port:
               number: 80
 
-  - host: result.107.20.228.88.nip.io # Replace with your actual domain or get the ip address by running nslookup+alb_dns then pick the ip address and replace it in the host field.
+  - host: result.52.201.208.153.nip.io # Replace with your actual domain or get the ip address by running nslookup+alb_dns then pick the ip address and replace it in the host field.
     http:
       paths:
       - path: /
