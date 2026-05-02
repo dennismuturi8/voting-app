@@ -64,7 +64,7 @@ module "alb" {
   public_subnet_ids = module.network.public_subnet_ids
 }
 
-module "bootstrap" {
+/*module "bootstrap" {
   source = "./Modules/Bootstrap"
   bastion_ip        = module.bastion.bastion_ip
   control_plane_ip  = module.compute.control_plane_ip
@@ -75,6 +75,6 @@ module "bootstrap" {
     module.bastion,
     module.compute
   ]
-}
+}*/
 
 

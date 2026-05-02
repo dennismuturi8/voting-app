@@ -1,4 +1,4 @@
-resource "null_resource" "cluster_bootstrap" {
+/*resource "null_resource" "cluster_bootstrap" {
   # This ensures the resource only runs AFTER the control plane VM is fully created
   depends_on = [var.control_plane_ip] 
 
@@ -69,7 +69,7 @@ variable "worker_ips" {
 
 variable "private_key_path" {
   type = string
-}
+}*/
 
 
 
