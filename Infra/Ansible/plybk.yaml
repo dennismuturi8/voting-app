@@ -1,140 +1,393 @@
 ---
-- name: Configure Kubeadm EC2 with Python, ArgoCD, Nginx Ingress, MetalLB, Cert-Manager, and CloudNativePG
+# =============================================================================
+# plybk.yaml — Voting App Full Cluster Setup Playbook
+#
+# Covers everything from main.tf null_resource bootstrap PLUS:
+#   - Helm installation
+#   - kube-prometheus-stack (Grafana + Prometheus + Alertmanager) on worker nodes
+#   - ArgoCD app manifest apply (directly from GitHub raw URL)
+#
+# All steps are idempotent — safe to re-run via ./manage.sh ansible
+# =============================================================================
+
+# =============================================================================
+# PLAY 1 — Label worker nodes (runs on control plane, targets workers via kubectl)
+# =============================================================================
+- name: Label Worker Nodes for Prometheus Scheduling
   hosts: control_plane
-  become: yes
+  become: false
+  gather_facts: false
+
   vars:
-    kubeconfig: /etc/kubernetes/admin.conf
-    argo_namespace: argocd
-    nginx_namespace: ingress-nginx
-    metallb_namespace: metallb-system
-    certmanager_namespace: cert-manager
-    cnpg_namespace: cnpg-system
-    argo_version: "v2.10.0" 
+    kubectl: "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf"
 
   tasks:
-    ## 1. Prerequisites
-    - name: Ensure Python3 and Pip are installed
-      apt:
-        name: [python3, python3-pip, curl, git, apt-transport-https]
-        state: present
-        update_cache: yes
 
-    - name: Check if Helm is installed
-      shell: which helm
-      register: helm_check
-      ignore_errors: yes
+    - name: Wait for all nodes to be Ready before labelling
+      shell: |
+        {{ kubectl }} get nodes --no-headers | grep -v Ready | wc -l
+      register: not_ready
+      retries: 20
+      delay: 15
+      until: not_ready.stdout | trim == "0"
       changed_when: false
 
-    - name: Install Helm (if not present)
+    - name: Get list of worker node names
       shell: |
-        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-      when: helm_check.rc != 0
+        {{ kubectl }} get nodes --no-headers \
+          -l '!node-role.kubernetes.io/control-plane' \
+          -o custom-columns='NAME:.metadata.name' \
+          --no-headers
+      register: worker_nodes
+      changed_when: false
 
-    ## 2. Install Nginx Ingress
-    - name: Create Nginx Ingress Namespace
-      shell: kubectl --kubeconfig {{ kubeconfig }} create namespace {{ nginx_namespace }}
-      register: ns_res
-      failed_when: false
-      changed_when: "'created' in ns_res.stdout"
+    - name: Label worker nodes with role=worker
+      shell: |
+        {{ kubectl }} label node {{ item }} role=worker --overwrite
+      loop: "{{ worker_nodes.stdout_lines }}"
+      when: worker_nodes.stdout_lines | length > 0
 
-    - name: Apply Nginx Ingress (Kubeadm/Bare-metal version)
-      shell: >
-        kubectl --kubeconfig {{ kubeconfig }} apply -f 
-        https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.9.4/deploy/static/provider/baremetal/deploy.yaml
-      register: nginx_out
-      changed_when: "'created' in nginx_out.stdout or 'configured' in nginx_out.stdout"
+    - name: Confirm worker labels applied
+      command: "{{ kubectl }} get nodes --show-labels"
+      register: node_labels
+      changed_when: false
 
-    ## 3. Install ArgoCD
-    - name: Create ArgoCD Namespace
-      shell: kubectl --kubeconfig {{ kubeconfig }} create namespace {{ argo_namespace }}
-      register: argo_ns_res
-      failed_when: false
-      changed_when: "'created' in argo_ns_res.stdout"
+    - name: Print node labels
+      debug:
+        msg: "{{ node_labels.stdout_lines }}"
 
-    - name: Apply ArgoCD Manifest (Using Server-Side Apply)
-      shell: >
-        kubectl --kubeconfig {{ kubeconfig }} apply --server-side --force-conflicts 
-        -n {{ argo_namespace }} -f 
-        https://raw.githubusercontent.com/argoproj/argo-cd/{{ argo_version }}/manifests/install.yaml
-      register: argo_out
-      changed_when: "'created' in argo_out.stdout or 'configured' in argo_out.stdout"
 
-    ## 4. Install MetalLB
-    - name: Create MetalLB Namespace
-      shell: kubectl --kubeconfig {{ kubeconfig }} create namespace {{ metallb_namespace }}
-      register: metallb_ns_res
-      failed_when: false
-      changed_when: "'created' in metallb_ns_res.stdout"
+# =============================================================================
+# PLAY 2 — Bootstrap + Configure Control Plane
+# =============================================================================
+- name: Bootstrap and Configure Control Plane
+  hosts: control_plane
+  become: false
+  gather_facts: true
 
-    - name: Apply MetalLB Manifest
-      shell: >
-        kubectl --kubeconfig {{ kubeconfig }} apply -f 
-        https://raw.githubusercontent.com/metallb/metallb/v0.13.12/config/manifests/metallb-native.yaml
-      register: metallb_out
-      changed_when: "'created' in metallb_out.stdout or 'configured' in metallb_out.stdout"
+  vars:
+    kubectl: "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf"
+    argocd_namespace: argocd
+    nginx_namespace: ingress-nginx
+    voting_namespace: voting
+    monitoring_namespace: monitoring
 
-    ## 5. Install Cert-Manager
-    - name: Add Jetstack Helm repository
-      shell: >
-        helm repo add jetstack https://charts.jetstack.io &&
-        helm repo update
-      args:
-        executable: /bin/bash
-      register: helm_repo_out
-      changed_when: "'added' in helm_repo_out.stdout or 'updated' in helm_repo_out.stdout"
+  tasks:
 
-    - name: Create Cert-Manager Namespace
-      shell: kubectl --kubeconfig {{ kubeconfig }} create namespace {{ certmanager_namespace }}
-      register: certmanager_ns_res
-      failed_when: false
-      changed_when: "'created' in certmanager_ns_res.stdout"
+    # ── 1. Wait for apt locks (mirrors main.tf step 1) ───────────────────────
+    - name: Wait for dpkg/apt locks to clear
+      shell: |
+        while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+          sleep 5
+        done
+        echo "locks_clear"
+      register: apt_lock_wait
+      changed_when: false
+      timeout: 300
 
-    - name: Install Cert-Manager via Helm
-      shell: >
-        KUBECONFIG={{ kubeconfig }} helm upgrade --install cert-manager jetstack/cert-manager
-        --namespace {{ certmanager_namespace }}
-        --version v1.13.3
-        --set installCRDs=true
-      register: certmanager_out
-      changed_when: "'deployed' in certmanager_out.stdout or 'upgraded' in certmanager_out.stdout"
+    # ── 2. apt-get update (mirrors main.tf step 2) ───────────────────────────
+    - name: Run apt-get update
+      become: true
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
 
-    ## 6. Install CloudNativePG (CNPG)
-    - name: Add CloudNativePG Helm repository
-      shell: >
-        helm repo add cnpg https://cloudnative-pg.github.io/charts &&
-        helm repo update
-      args:
-        executable: /bin/bash
-      register: cnpg_repo_out
-      changed_when: "'added' in cnpg_repo_out.stdout or 'updated' in cnpg_repo_out.stdout"
+    # ── 3. Wait for Kubernetes API (mirrors main.tf step 3) ──────────────────
+    - name: Wait for Kubernetes API to respond
+      shell: |
+        timeout 300 bash -c \
+          'until sudo kubectl --kubeconfig /etc/kubernetes/admin.conf cluster-info; \
+           do sleep 10; done'
+      register: k8s_api_wait
+      changed_when: false
 
-    - name: Create CloudNativePG Namespace
-      shell: kubectl --kubeconfig {{ kubeconfig }} create namespace {{ cnpg_namespace }}
-      register: cnpg_ns_res
-      failed_when: false
-      changed_when: "'created' in cnpg_ns_res.stdout"
+    - name: Print cluster info
+      debug:
+        msg: "{{ k8s_api_wait.stdout_lines[0] }}"
 
-    - name: Install CloudNativePG Operator via Helm
-      shell: >
-        KUBECONFIG={{ kubeconfig }} helm upgrade --install cnpg cnpg/cloudnative-pg
-        --namespace {{ cnpg_namespace }}
-      register: cnpg_out
-      changed_when: "'deployed' in cnpg_out.stdout or 'upgraded' in cnpg_out.stdout"
-
-    ## 7. Setup Local User Access
-    - name: Create .kube directory for ubuntu user
+    # ── 4. Copy kubeconfig for ubuntu user ───────────────────────────────────
+    - name: Create .kube directory
       file:
-        path: "/home/ubuntu/.kube"
+        path: ~/.kube
         state: directory
-        owner: ubuntu
-        group: ubuntu
         mode: '0755'
 
-    - name: Copy admin.conf to user's kube config
-      copy:
-        src: /etc/kubernetes/admin.conf
-        dest: "/home/ubuntu/.kube/config"
-        remote_src: yes
-        owner: ubuntu
-        group: ubuntu
-        mode: '0600'
+    - name: Copy admin.conf to user kubeconfig
+      shell: |
+        sudo cp /etc/kubernetes/admin.conf ~/.kube/config
+        sudo chown $(id -u):$(id -g) ~/.kube/config
+      args:
+        creates: ~/.kube/config
+
+    # ── 5. ArgoCD (mirrors main.tf steps 4-5) ────────────────────────────────
+    - name: Create ArgoCD namespace (idempotent)
+      shell: |
+        {{ kubectl }} create namespace {{ argocd_namespace }} \
+          --dry-run=client -o yaml | {{ kubectl }} apply -f -
+      changed_when: false
+
+    - name: Check if ArgoCD is already installed
+      command: "{{ kubectl }} get deployment argocd-server -n {{ argocd_namespace }}"
+      register: argocd_installed
+      ignore_errors: true
+      changed_when: false
+
+    - name: Install ArgoCD (server-side apply with force-conflicts)
+      shell: |
+        {{ kubectl }} apply \
+          --server-side \
+          --force-conflicts \
+          -n {{ argocd_namespace }} \
+          -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+      when: argocd_installed.rc != 0
+
+    - name: Wait for ArgoCD server deployment to be available
+      shell: |
+        {{ kubectl }} wait \
+          --namespace {{ argocd_namespace }} \
+          --for=condition=available \
+          deployment/argocd-server \
+          --timeout=180s
+      register: argocd_wait
+      retries: 3
+      delay: 20
+      until: argocd_wait.rc == 0
+
+    - name: Confirm ArgoCD pods
+      command: "{{ kubectl }} get pods -n {{ argocd_namespace }}"
+      register: argocd_pods
+      changed_when: false
+
+    - name: Print ArgoCD pods
+      debug:
+        msg: "{{ argocd_pods.stdout_lines }}"
+
+    # ── 6. NGINX Ingress (mirrors main.tf steps 6-9) ─────────────────────────
+    - name: Create ingress-nginx namespace (idempotent)
+      shell: |
+        {{ kubectl }} create namespace {{ nginx_namespace }} \
+          --dry-run=client -o yaml | {{ kubectl }} apply -f -
+      changed_when: false
+
+    - name: Check if NGINX Ingress is already installed
+      command: "{{ kubectl }} get deployment ingress-nginx-controller -n {{ nginx_namespace }}"
+      register: nginx_installed
+      ignore_errors: true
+      changed_when: false
+
+    - name: Install NGINX Ingress Controller (baremetal)
+      shell: |
+        {{ kubectl }} apply -f \
+          https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/baremetal/deploy.yaml
+      when: nginx_installed.rc != 0
+
+    - name: Wait for NGINX Ingress Controller to be available
+      shell: |
+        {{ kubectl }} wait \
+          --namespace {{ nginx_namespace }} \
+          --for=condition=available \
+          deployment/ingress-nginx-controller \
+          --timeout=300s
+      register: nginx_wait
+      retries: 3
+      delay: 15
+      until: nginx_wait.rc == 0
+
+    - name: Get current NGINX NodePorts
+      shell: |
+        {{ kubectl }} get svc ingress-nginx-controller \
+          -n {{ nginx_namespace }} \
+          -o jsonpath='{.spec.ports[0].nodePort},{.spec.ports[1].nodePort}'
+      register: current_nodeports
+      changed_when: false
+
+    - name: Patch NGINX NodePorts to 31000/31001 (for ALB compatibility)
+      shell: |
+        {{ kubectl }} patch svc ingress-nginx-controller \
+          -n {{ nginx_namespace }} \
+          --type='json' \
+          -p='[
+            {"op": "replace", "path": "/spec/ports/0/nodePort", "value": 31000},
+            {"op": "replace", "path": "/spec/ports/1/nodePort", "value": 31001}
+          ]'
+      when: current_nodeports.stdout != "31000,31001"
+
+    - name: Confirm NGINX service ports
+      command: "{{ kubectl }} get svc ingress-nginx-controller -n {{ nginx_namespace }}"
+      register: nginx_svc
+      changed_when: false
+
+    - name: Print NGINX service
+      debug:
+        msg: "{{ nginx_svc.stdout_lines }}"
+
+    # ── 7. Install Helm ───────────────────────────────────────────────────────
+    - name: Check if Helm is already installed
+      command: helm version --short
+      register: helm_check
+      ignore_errors: true
+      changed_when: false
+
+    - name: Download Helm install script
+      get_url:
+        url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        dest: /tmp/get_helm.sh
+        mode: '0755'
+      when: helm_check.rc != 0
+
+    - name: Install Helm
+      command: /tmp/get_helm.sh
+      when: helm_check.rc != 0
+
+    - name: Confirm Helm version
+      command: helm version --short
+      register: helm_version
+      changed_when: false
+
+    - name: Print Helm version
+      debug:
+        msg: "Helm: {{ helm_version.stdout }}"
+
+    # ── 8. kube-prometheus-stack on Worker Nodes ──────────────────────────────
+    - name: Create monitoring namespace (idempotent)
+      shell: |
+        {{ kubectl }} create namespace {{ monitoring_namespace }} \
+          --dry-run=client -o yaml | {{ kubectl }} apply -f -
+      changed_when: false
+
+    - name: Add Prometheus Community Helm repo
+      command: helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+      register: repo_add
+      changed_when: "'already exists' not in repo_add.stdout"
+      ignore_errors: true
+
+    - name: Update Helm repos
+      command: helm repo update
+      changed_when: false
+
+    - name: Check if kube-prometheus-stack is already installed
+      command: helm status prometheus -n {{ monitoring_namespace }}
+      register: prometheus_installed
+      ignore_errors: true
+      changed_when: false
+
+    - name: Install kube-prometheus-stack pinned to worker nodes
+      # nodeSelector: role=worker — applied to all components
+      # This ensures Grafana, Prometheus, Alertmanager all land on workers
+      # not the control plane (which has NoSchedule taint by default on kubeadm)
+      shell: |
+        helm install prometheus prometheus-community/kube-prometheus-stack \
+          --namespace {{ monitoring_namespace }} \
+          --set grafana.nodeSelector.role=worker \
+          --set prometheus.prometheusSpec.nodeSelector.role=worker \
+          --set alertmanager.alertmanagerSpec.nodeSelector.role=worker \
+          --set prometheusOperator.nodeSelector.role=worker \
+          --set kube-state-metrics.nodeSelector.role=worker \
+          --set prometheus-node-exporter.nodeSelector.role=worker \
+          --set grafana.adminPassword=admin \
+          --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+          --set alertmanager.enabled=true \
+          --wait \
+          --timeout 5m
+      when: prometheus_installed.rc != 0
+
+    - name: Wait for Grafana to be available
+      shell: |
+        {{ kubectl }} wait \
+          --namespace {{ monitoring_namespace }} \
+          --for=condition=available \
+          deployment/prometheus-grafana \
+          --timeout=180s
+      register: grafana_wait
+      retries: 3
+      delay: 20
+      until: grafana_wait.rc == 0
+
+    - name: Confirm monitoring pods and which nodes they landed on
+      shell: |
+        {{ kubectl }} get pods -n {{ monitoring_namespace }} \
+          -o wide --no-headers | awk '{print $1, $7}'
+      register: monitoring_pods
+      changed_when: false
+
+    - name: Print monitoring pod placement
+      debug:
+        msg: "{{ monitoring_pods.stdout_lines }}"
+
+    # ── 9. Create Voting Namespace ────────────────────────────────────────────
+    - name: Create voting namespace (idempotent)
+      shell: |
+        {{ kubectl }} create namespace {{ voting_namespace }} \
+          --dry-run=client -o yaml | {{ kubectl }} apply -f -
+      changed_when: false
+
+    # ── 10. Apply ArgoCD App Manifest ────────────────────────────────────────
+    - name: Apply argocd-app.yaml from GitHub (registers all apps with ArgoCD)
+      shell: |
+        {{ kubectl }} apply -f \
+          https://raw.githubusercontent.com/dennismuturi8/voting-app/main/argocd/argocd-app.yaml
+      register: argocd_apply
+
+    - name: Print ArgoCD apply output
+      debug:
+        msg: "{{ argocd_apply.stdout_lines }}"
+
+    # ── 11. Retrieve Passwords ────────────────────────────────────────────────
+    - name: Get ArgoCD admin password
+      shell: |
+        {{ kubectl }} get secret argocd-initial-admin-secret \
+          -n {{ argocd_namespace }} \
+          -o jsonpath="{.data.password}" | base64 --decode && echo
+      register: argocd_password
+      changed_when: false
+
+    - name: Get Grafana admin password
+      shell: |
+        {{ kubectl }} get secret prometheus-grafana \
+          -n {{ monitoring_namespace }} \
+          -o jsonpath="{.data.admin-password}" | base64 --decode && echo
+      register: grafana_password
+      changed_when: false
+
+    # ── 12. Final Summary ─────────────────────────────────────────────────────
+    - name: Print full access summary
+      debug:
+        msg:
+          - "========================================================"
+          - " ✅  Voting App Cluster Setup Complete!"
+          - "========================================================"
+          - ""
+          - "── ArgoCD ──────────────────────────────────────────────"
+          - "  Username : admin"
+          - "  Password : {{ argocd_password.stdout }}"
+          - "  Access   : ./manage.sh proxy → https://argocd-server.argocd.svc.cluster.local"
+          - "  Or       : kubectl port-forward svc/argocd-server -n argocd 8080:443"
+          - "             then open https://localhost:8080"
+          - ""
+          - "── Grafana ─────────────────────────────────────────────"
+          - "  Username : admin"
+          - "  Password : {{ grafana_password.stdout }}"
+          - "  Runs on  : Worker nodes (nodeSelector: role=worker)"
+          - "  Access   : ./manage.sh proxy → http://prometheus-grafana.monitoring:80"
+          - "  Or       : kubectl port-forward svc/prometheus-grafana -n monitoring 3000:80"
+          - "             then open http://localhost:3000"
+          - ""
+          - "── Prometheus ──────────────────────────────────────────"
+          - "  Runs on  : Worker nodes (nodeSelector: role=worker)"
+          - "  Access   : kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 9091:9090"
+          - "             then open http://localhost:9091"
+          - ""
+          - "── Alertmanager ────────────────────────────────────────"
+          - "  Runs on  : Worker nodes (nodeSelector: role=worker)"
+          - "  Access   : kubectl port-forward svc/prometheus-kube-prometheus-alertmanager -n monitoring 9093:9093"
+          - "             then open http://localhost:9093"
+          - ""
+          - "── SOCKS Proxy (access all UIs at once) ────────────────"
+          - "  Run      : ./manage.sh proxy"
+          - "  Then set : browser SOCKS5 → 127.0.0.1:9090"
+          - "  Reach    : any ClusterIP/svc DNS directly in browser"
+          - ""
+          - "── App URLs ────────────────────────────────────────────"
+          - "  Run      : ./manage.sh urls"
+          - "  (requires ALB to be provisioned and nslookup to resolve)"
+          - "========================================================"
