@@ -1,0 +1,155 @@
+---
+# App 1 — Vote frontend (Deployment + Service)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vote-app
+  namespace: voting
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/dennismuturi8/voting-app.git
+    targetRevision: main
+    path: k8s/vote
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: voting
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - ServerSideApply=true
+
+---
+# App 2 — Result frontend (Deployment + Service)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: result-app
+  namespace: voting
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/dennismuturi8/voting-app.git
+    targetRevision: main
+    path: k8s/result
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: voting
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - ServerSideApply=true
+
+---
+# App 3 — Worker (.NET background processor)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: worker-app
+  namespace: voting
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/dennismuturi8/voting-app.git
+    targetRevision: main
+    path: k8s/worker
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: voting
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - ServerSideApply=true
+
+---
+# App 4 — Redis (in-memory vote queue)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: redis-app
+  namespace: voting
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/dennismuturi8/voting-app.git
+    targetRevision: main
+    path: k8s/redis
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: voting
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - ServerSideApply=true
+
+---
+# App 5 — PostgreSQL (persistent vote storage)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: db-app
+  namespace: voting
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/dennismuturi8/voting-app.git
+    targetRevision: main
+    path: k8s/db
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: voting
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - ServerSideApply=true
+
+---
+# App 6 — NGINX Ingress rules (host-based routing to vote + result)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ingress-voting-app
+  namespace: voting
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/dennismuturi8/voting-app.git
+    targetRevision: main
+    path: k8s/ingress
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: voting
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - ServerSideApply=true

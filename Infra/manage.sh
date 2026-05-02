@@ -54,8 +54,9 @@ extract_tf_outputs() {
   BASTION=$(terraform output -raw bastion_ip)
   CONTROL_PLANE=$(terraform output -raw control_plane_ip)
   WORKERS=$(terraform output -json worker_ips | jq -r '.[]')
-  USER=$(terraform output -raw ssh_user)
+  SSH_USER=$(terraform output -raw ssh_user)
   KEY=$(terraform output -raw ssh_key_path)
+  KEY="${KEY/#\~/$HOME}" 
   cd ..
   success "Outputs extracted — bastion=$BASTION, control_plane=$CONTROL_PLANE"
 }
@@ -75,17 +76,22 @@ generate_inventory() {
   info "Generating inventory.ini from Terraform outputs..."
   cat > "$ANSIBLE_DIR/inventory.ini" <<EOF
 [bastion]
-bastion ansible_host=$BASTION ansible_user=$USER ansible_ssh_private_key_file=$KEY
+jumphost ansible_host=$BASTION ansible_user=$SSH_USER ansible_ssh_private_key_file=$KEY
 
 [control_plane]
-$CONTROL_PLANE ansible_user=$USER ansible_ssh_private_key_file=$KEY
+$CONTROL_PLANE ansible_user=$SSH_USER ansible_ssh_private_key_file=$KEY
 
 [workers]
-$(for ip in $WORKERS; do echo "$ip ansible_user=$USER ansible_ssh_private_key_file=$KEY"; done)
+$(for ip in $WORKERS; do echo "$ip ansible_user=$SSH_USER ansible_ssh_private_key_file=$KEY"; done)
 
 [all:vars]
 ansible_python_interpreter=/usr/bin/python3
-ansible_ssh_common_args='-o StrictHostKeyChecking=no -o ForwardAgent=yes -J $USER@$BASTION'
+
+[control_plane:vars]
+ansible_ssh_common_args=-o StrictHostKeyChecking=no -o ForwardAgent=yes -o ProxyCommand='ssh -W %h:%p -o StrictHostKeyChecking=no -i $KEY $SSH_USER@$BASTION'
+
+[workers:vars]
+ansible_ssh_common_args=-o StrictHostKeyChecking=no -o ForwardAgent=yes -o ProxyCommand='ssh -W %h:%p -o StrictHostKeyChecking=no -i $KEY $SSH_USER@$BASTION'
 EOF
   success "inventory.ini written to $ANSIBLE_DIR/inventory.ini"
 }
@@ -134,13 +140,13 @@ case "$1" in
     info "Fetching credentials..."
     setup_ssh_agent
     PASSWORD=$(ssh -o StrictHostKeyChecking=no -A \
-      -J "$USER@$BASTION" "$USER@$CONTROL_PLANE" \
+      -J "$SSH_USER@$BASTION" "$SSH_USER@$CONTROL_PLANE" \
       "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf \
        get secret argocd-initial-admin-secret -n argocd \
        -o jsonpath='{.data.password}' | base64 --decode && echo")
 
     GRAFANA_PASSWORD=$(ssh -o StrictHostKeyChecking=no -A \
-      -J "$USER@$BASTION" "$USER@$CONTROL_PLANE" \
+      -J "$SSH_USER@$BASTION" "$SSH_USER@$CONTROL_PLANE" \
       "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf \
        get secret prometheus-grafana -n monitoring \
        -o jsonpath='{.data.admin-password}' | base64 --decode && echo" 2>/dev/null || echo "not yet available")
@@ -156,7 +162,7 @@ case "$1" in
     echo ""
 
     ALB_DNS=$(ssh -o StrictHostKeyChecking=no -A \
-      -J "$USER@$BASTION" "$USER@$CONTROL_PLANE" \
+      -J "$SSH_USER@$BASTION" "$SSH_USER@$CONTROL_PLANE" \
       "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf \
        get svc ingress-nginx-controller -n ingress-nginx \
        -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo ''")
@@ -214,7 +220,7 @@ case "$1" in
     info "Fetching ArgoCD application status..."
     echo ""
     ssh -o StrictHostKeyChecking=no -A \
-      -J "$USER@$BASTION" "$USER@$CONTROL_PLANE" \
+      -J "$SSH_USER@$BASTION" "$SSH_USER@$CONTROL_PLANE" \
       "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf \
        get applications -n argocd \
        -o custom-columns='APP:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status'"
@@ -227,13 +233,13 @@ case "$1" in
     info "Retrieving passwords..."
 
     PASSWORD=$(ssh -o StrictHostKeyChecking=no -A \
-      -J "$USER@$BASTION" "$USER@$CONTROL_PLANE" \
+      -J "$SSH_USER@$BASTION" "$SSH_USER@$CONTROL_PLANE" \
       "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf \
        get secret argocd-initial-admin-secret -n argocd \
        -o jsonpath='{.data.password}' | base64 --decode && echo")
 
     GRAFANA_PASSWORD=$(ssh -o StrictHostKeyChecking=no -A \
-      -J "$USER@$BASTION" "$USER@$CONTROL_PLANE" \
+      -J "$SSH_USER@$BASTION" "$SSH_USER@$CONTROL_PLANE" \
       "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf \
        get secret prometheus-grafana -n monitoring \
        -o jsonpath='{.data.admin-password}' | base64 --decode && echo" 2>/dev/null || echo "not yet available")
@@ -268,7 +274,7 @@ case "$1" in
     info "Looking up ALB DNS..."
 
     ALB_DNS=$(ssh -o StrictHostKeyChecking=no -A \
-      -J "$USER@$BASTION" "$USER@$CONTROL_PLANE" \
+      -J "$SSH_USER@$BASTION" "$SSH_USER@$CONTROL_PLANE" \
       "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf \
        get svc ingress-nginx-controller -n ingress-nginx \
        -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo ''")
@@ -307,7 +313,7 @@ case "$1" in
     setup_ssh_agent
     info "Opening SSH session to control plane via bastion..."
     ssh -o StrictHostKeyChecking=no -A \
-      -J "$USER@$BASTION" "$USER@$CONTROL_PLANE"
+      -J "$SSH_USER@$BASTION" "$SSH_USER@$CONTROL_PLANE"
     ;;
 
 # ─── Command: proxy ───────────────────────────────────────────────────────────
@@ -318,7 +324,7 @@ case "$1" in
     info "Set FoxyProxy or browser to SOCKS5 → 127.0.0.1:9090"
     echo ""
     ssh -D 9090 -N -o StrictHostKeyChecking=no -A \
-      -J "$USER@$BASTION" "$USER@$CONTROL_PLANE"
+      -J "$SSH_USER@$BASTION" "$SSH_USER@$CONTROL_PLANE"
     ;;
 
   *)
