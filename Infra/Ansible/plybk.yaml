@@ -271,10 +271,23 @@
       ignore_errors: true
       changed_when: false
 
+    - name: Check for failed/stuck Helm release and clean it up
+      # A failed release blocks re-installs — uninstall it first if status is failed
+      shell: |
+        STATUS=$(helm status prometheus -n {{ monitoring_namespace }} \
+          -o json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['info']['status'])" 2>/dev/null || echo "notfound")
+        if [ "$STATUS" = "failed" ] || [ "$STATUS" = "pending-install" ]; then
+          helm uninstall prometheus -n {{ monitoring_namespace }} || true
+          echo "cleaned"
+        else
+          echo "ok"
+        fi
+      register: helm_cleanup
+      changed_when: "'cleaned' in helm_cleanup.stdout"
+
     - name: Install kube-prometheus-stack pinned to worker nodes
-      # nodeSelector: role=worker — applied to all components
-      # This ensures Grafana, Prometheus, Alertmanager all land on workers
-      # not the control plane (which has NoSchedule taint by default on kubeadm)
+      # --no-wait: don't block here — we wait separately with retries below
+      # This avoids the 5m hard timeout killing the task before images finish pulling
       shell: |
         helm install prometheus prometheus-community/kube-prometheus-stack \
           --namespace {{ monitoring_namespace }} \
@@ -287,26 +300,39 @@
           --set grafana.adminPassword=admin \
           --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
           --set alertmanager.enabled=true \
-          --wait \
-          --timeout 5m
-      when: prometheus_installed.rc != 0
+          --timeout 10m
+      when: prometheus_installed.rc != 0 or "'cleaned' in helm_cleanup.stdout"
 
-    - name: Wait for Grafana to be available
+    - name: Wait for Prometheus operator to be ready (retries every 30s for 10 min)
+      shell: |
+        {{ kubectl }} wait \
+          --namespace {{ monitoring_namespace }} \
+          --for=condition=available \
+          deployment/prometheus-kube-prometheus-operator \
+          --timeout=30s
+      register: operator_wait
+      retries: 20
+      delay: 30
+      until: operator_wait.rc == 0
+      changed_when: false
+
+    - name: Wait for Grafana to be ready (retries every 30s for 10 min)
       shell: |
         {{ kubectl }} wait \
           --namespace {{ monitoring_namespace }} \
           --for=condition=available \
           deployment/prometheus-grafana \
-          --timeout=180s
+          --timeout=30s
       register: grafana_wait
-      retries: 3
-      delay: 20
+      retries: 20
+      delay: 30
       until: grafana_wait.rc == 0
+      changed_when: false
 
     - name: Confirm monitoring pods and which nodes they landed on
       shell: |
         {{ kubectl }} get pods -n {{ monitoring_namespace }} \
-          -o wide --no-headers | awk '{print $1, $7}'
+          -o wide --no-headers | awk '{print $1, $3, $7}'
       register: monitoring_pods
       changed_when: false
 

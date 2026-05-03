@@ -74,6 +74,10 @@ setup_ssh_agent() {
 # ─── Shared: Generate Ansible Inventory ───────────────────────────────────────
 generate_inventory() {
   info "Generating inventory.ini from Terraform outputs..."
+
+  # Build ProxyCommand with real values interpolated (double quotes expand vars)
+  PROXY_CMD="ssh -W %h:%p -o StrictHostKeyChecking=no -i $KEY $SSH_USER@$BASTION"
+
   cat > "$ANSIBLE_DIR/inventory.ini" <<EOF
 [bastion]
 jumphost ansible_host=$BASTION ansible_user=$SSH_USER ansible_ssh_private_key_file=$KEY
@@ -88,12 +92,24 @@ $(for ip in $WORKERS; do echo "$ip ansible_user=$SSH_USER ansible_ssh_private_ke
 ansible_python_interpreter=/usr/bin/python3
 
 [control_plane:vars]
-ansible_ssh_common_args=-o StrictHostKeyChecking=no -o ForwardAgent=yes -o ProxyCommand='ssh -W %h:%p -o StrictHostKeyChecking=no -i $KEY $SSH_USER@$BASTION'
+ansible_ssh_common_args=-o StrictHostKeyChecking=no -o ForwardAgent=yes -o ProxyCommand="$PROXY_CMD"
 
 [workers:vars]
-ansible_ssh_common_args=-o StrictHostKeyChecking=no -o ForwardAgent=yes -o ProxyCommand='ssh -W %h:%p -o StrictHostKeyChecking=no -i $KEY $SSH_USER@$BASTION'
+ansible_ssh_common_args=-o StrictHostKeyChecking=no -o ForwardAgent=yes -o ProxyCommand="$PROXY_CMD"
 EOF
-  success "inventory.ini written to $ANSIBLE_DIR/inventory.ini"
+
+  # ansible.cfg — disables host key checking and enables pipelining
+  cat > "$ANSIBLE_DIR/ansible.cfg" <<EOF
+[defaults]
+host_key_checking = False
+interpreter_python = /usr/bin/python3
+
+[ssh_connection]
+ssh_args = -o ForwardAgent=yes -o StrictHostKeyChecking=no -o ControlMaster=auto -o ControlPersist=60s
+pipelining = True
+EOF
+
+  success "inventory.ini and ansible.cfg written to $ANSIBLE_DIR/"
 }
 
 # ─── Command: up ──────────────────────────────────────────────────────────────
@@ -188,8 +204,8 @@ case "$1" in
     cd "$TF_DIR"
     terraform destroy -auto-approve
     cd ..
-    rm -f "$ANSIBLE_DIR/inventory.ini"
-    success "inventory.ini deleted."
+    rm -f "$ANSIBLE_DIR/inventory.ini ansible.cfg"
+    success "inventory.ini & ansible.cfg deleted."
     success "=== Destroy Complete ==="
     ;;
 
