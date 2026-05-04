@@ -204,7 +204,8 @@ case "$1" in
     cd "$TF_DIR"
     terraform destroy -auto-approve
     cd ..
-    rm -f "$ANSIBLE_DIR/inventory.ini ansible.cfg"
+    rm -f "$ANSIBLE_DIR/inventory.ini"
+    rm -f "$ANSIBLE_DIR/ansible.cfg"
     success "inventory.ini & ansible.cfg deleted."
     success "=== Destroy Complete ==="
     ;;
@@ -287,16 +288,15 @@ case "$1" in
   urls)
     extract_tf_outputs
     setup_ssh_agent
-    info "Looking up ALB DNS..."
 
-    ALB_DNS=$(ssh -o StrictHostKeyChecking=no -A \
-      -J "$SSH_USER@$BASTION" "$SSH_USER@$CONTROL_PLANE" \
-      "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf \
-       get svc ingress-nginx-controller -n ingress-nginx \
-       -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo ''")
+    # ALB is provisioned by Terraform — read it directly from outputs
+    info "Reading ALB DNS from Terraform outputs..."
+    cd "$TF_DIR"
+    ALB_DNS=$(terraform output -raw alb_dns 2>/dev/null || echo "")
+    cd ..
 
     if [[ -z "$ALB_DNS" ]]; then
-      warn "Could not auto-detect ALB DNS. Check your ALB in the AWS console."
+      warn "Could not read alb_dns from Terraform outputs. Check your main.tf has an alb_dns output."
       exit 1
     fi
 
